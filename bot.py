@@ -9,6 +9,7 @@ from aiogram.client.default import DefaultBotProperties
 from dotenv import load_dotenv
 import requests
 import json
+import aiohttp
 
 load_dotenv()
 
@@ -210,20 +211,57 @@ async def examples(message: Message):
 async def help_button(message: Message):
     await help_command(message)
 
-@dp.message()
-async def handle_message(message: Message):
-    user_text = message.text
+async def call_gemini_api(user_text: str) -> str:
+    """Функция для вызова Gemini API с улучшенной обработкой языков"""
     
-    await bot.send_chat_action(message.chat.id, "typing")
+    # Определяем язык запроса и создаем соответствующий промпт
+    central_asian_keywords = [
+        # Казахский
+        "сәлем", "салем", "жарайды", "рахмет", "көмек", "сурау",
+        # Узбекский
+        "салом", "хайр", "рахмат", "ёрдам", "сўров",
+        # Кыргызский
+        "салам", "жакшы", "рахмат", "жардам", "суроо",
+        # Таджикский
+        "салом", "хуб", "рахмат", "ёрдам", "пурсиш"
+    ]
     
-    try:
-        thinking_msg = await message.answer("Обрабатываю ваш запрос...")
-        
-        # Улучшенный промпт для более человеческих ответов
-        payload = {
-            "contents": [{
-                "parts": [{
-                    "text": f"""Ты - умный помощник, который дает четкие, структурированные ответы на русском языке. 
+    is_central_asian = any(keyword in user_text.lower() for keyword in central_asian_keywords)
+    
+    # Специальные ответы для вопросов о создателе
+    creator_questions = [
+        "кто твой создатель", "кто создал тебя", "who created you", 
+        "ким сені жасады", "ким сени жасанды", "сені кім жасады",
+        "сени ким жасанды", "ким сенди жаратты", "сенди ким жаратты"
+    ]
+    
+    if any(question in user_text.lower() for question in creator_questions):
+        if is_central_asian:
+            return "Мені жасаған - Azamatstln (Азаматстлн). Ол боттарды әзірлеумен айналысады және мені жаратты."
+        else:
+            return "Меня создал Azamatstln. Он занимается разработкой ботов и создал меня."
+    
+    # Улучшенный промпт для более человеческих ответов с поддержкой языков
+    if is_central_asian:
+        prompt = f"""Ты - умный помощник, который дает четкие, структурированные ответы. 
+
+Требования к ответу:
+1. Если запрос на казахском, узбекском, кыргызском или другом языке Средней Азии - отвечай на том же языке
+2. Если запрос смешанный или непонятный - отвечай на русском
+3. Будь конкретным и по делу
+4. Избегай лишних эмоций и смайликов
+5. Структурируй ответ, если тема сложная
+6. Используй простой и понятный язык
+7. Не добавляй вступление вроде "Привет! Я рад помочь"
+8. Давай информацию сразу по существу
+9. Если вопрос простой - отвечай кратко
+10. Если сложный - разбивай на логические части
+
+Запрос пользователя: {user_text}
+
+Ответ:"""
+    else:
+        prompt = f"""Ты - умный помощник, который дает четкие, структурированные ответы на русском языке. 
 
 Требования к ответу:
 1. Будь конкретным и по делу
@@ -238,68 +276,102 @@ async def handle_message(message: Message):
 Запрос пользователя: {user_text}
 
 Ответ:"""
-                }]
-            }],
-            "generationConfig": {
-                "temperature": 0.3,  # Более консервативные ответы
-                "topK": 40,
-                "topP": 0.8,
-                "maxOutputTokens": 2048,
-            }
+
+    payload = {
+        "contents": [{
+            "parts": [{
+                "text": prompt
+            }]
+        }],
+        "generationConfig": {
+            "temperature": 0.3,
+            "topK": 40,
+            "topP": 0.8,
+            "maxOutputTokens": 2048,
         }
+    }
 
-        headers = {'Content-Type': 'application/json'}
-        response = requests.post(API_URL, json=payload, headers=headers, timeout=30)
-        response.raise_for_status()
-        
-        data = response.json()
-        
-        if "candidates" in data and data["candidates"]:
-            answer = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-            
-            await bot.delete_message(message.chat.id, thinking_msg.message_id)
-            
-            # Сохраняем запрос в базу данных
-            user = message.from_user
-            save_request(
-                user_id=user.id,
-                username=user.username,
-                first_name=user.first_name,
-                last_name=user.last_name,
-                user_message=user_text,
-                bot_response=answer[:500]
-            )
-            
-            # Отправляем чистый ответ без лишнего оформления
-            await message.answer(answer)
-            
-        else:
-            error_msg = "Не удалось получить ответ от AI. Попробуйте переформулировать вопрос."
-            await message.answer(error_msg)
-            
-            user = message.from_user
-            save_request(
-                user_id=user.id,
-                username=user.username,
-                first_name=user.first_name,
-                last_name=user.last_name,
-                user_message=user_text,
-                bot_response="ОШИБКА: Не удалось получить ответ от AI"
-            )
-
-    except requests.exceptions.Timeout:
-        error_msg = "Время ожидания истекло. Попробуйте еще раз."
-        await message.answer(error_msg)
-        
-    except requests.exceptions.RequestException as e:
-        error_msg = "Техническая ошибка. Попробуйте позже."
-        await message.answer(error_msg)
-        print(f"Network error: {e}")
+    headers = {'Content-Type': 'application/json'}
     
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(API_URL, json=payload, headers=headers, timeout=30) as response:
+                response.raise_for_status()
+                data = await response.json()
+                
+                if "candidates" in data and data["candidates"]:
+                    answer = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                    return answer
+                else:
+                    return "Не удалось получить ответ от AI. Попробуйте переформулировать вопрос."
+                    
+    except Exception as e:
+        print(f"API Error: {e}")
+        return "Техническая ошибка. Попробуйте позже."
+
+@dp.message()
+async def handle_message(message: Message):
+    user_text = message.text
+    
+    await bot.send_chat_action(message.chat.id, "typing")
+    
+    try:
+        thinking_msg = await message.answer("Обрабатываю ваш запрос...")
+        
+        answer = await call_gemini_api(user_text)
+        
+        await bot.delete_message(message.chat.id, thinking_msg.message_id)
+        
+        # Сохраняем запрос в базу данных
+        user = message.from_user
+        save_request(
+            user_id=user.id,
+            username=user.username,
+            first_name=user.first_name,
+            last_name=user.last_name,
+            user_message=user_text,
+            bot_response=answer[:500]
+        )
+        
+        # Отправляем чистый ответ без лишнего оформления
+        await message.answer(answer)
+            
     except Exception as e:
         error_msg = "Произошла непредвиденная ошибка. Попробуйте еще раз."
         await message.answer(error_msg)
         print(f"Unexpected error: {e}")
+
+async def self_test():
+    """Функция для самопроверки бота"""
+    try:
+        # Отправляем тестовый запрос самому себе
+        test_message = "Привет! Ответь коротко - ты работаешь?"
+        print("Отправляю тестовый запрос...")
+        
+        answer = await call_gemini_api(test_message)
+        print(f"Тестовый ответ: {answer}")
+        
+        return True
+    except Exception as e:
+        print(f"Ошибка самопроверки: {e}")
+        return False
+
+async def keep_alive():
+    """Функция для поддержания активности бота"""
+    while True:
+        try:
+            # Проверяем соединение с ботом
+            me = await bot.get_me()
+            print(f"Бот активен: {me.username} - {datetime.now()}")
+            
+            # Выполняем самопроверку каждые 10 минут
+            await self_test()
+            
+        except Exception as e:
+            print(f"Ошибка поддержания активности: {e}")
+        
+        # Ждем 10 минут до следующей проверки
+        await asyncio.sleep(600)
 
 def view_database():
     conn = sqlite3.connect('requests.db')
@@ -348,7 +420,22 @@ async def main():
     
     view_database()
     
+    # Запускаем фоновую задачу для поддержания активности
+    asyncio.create_task(keep_alive())
+    
+    print("Фоновая задача поддержания активности запущена!")
+    
+    # Запускаем опрос
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # Для Render важно обрабатывать корректное завершение
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("Бот остановлен пользователем")
+    except Exception as e:
+        print(f"Критическая ошибка: {e}")
+        # Перезапускаем через некоторое время
+        asyncio.run(asyncio.sleep(5))
+        asyncio.run(main())
