@@ -84,7 +84,7 @@ def get_stats():
 main_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="О боте"), KeyboardButton(text="Примеры запросов")],
-        [KeyboardButton(text="Помощь"), 
+        [KeyboardButton(text="Помощь"), ]
     ],
     resize_keyboard=True,
     input_field_placeholder="Напишите ваш вопрос..."
@@ -173,7 +173,7 @@ async def about_bot(message: Message):
     about_text = """
 <b>О боте</b>
 
-Я - интеллектуальный помощник STLNbot, основанным @azastln, на модели Gemini 2.0 Flash Experimental.
+Я - интеллектуальный текстовый, основанный на модели Gemini 2.0 Flash Experimental, разработчиком @azastln.
 
 Мои возможности:
 • Отвечать на вопросы любой сложности
@@ -223,7 +223,7 @@ async def handle_message(message: Message):
         payload = {
             "contents": [{
                 "parts": [{
-                    "text": f"""Ты - умный человек, который дает четкие, структурированные ответы на русском языке для моего развитие. 
+                    "text": f"""Ты - умный помощник, который дает четкие, структурированные ответы на русском языке. 
 
 Требования к ответу:
 1. Будь конкретным и по делу
